@@ -77,6 +77,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Pull image locally and save to tar
+        env:
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker pull $IMAGE_TAG
+          docker save $IMAGE_TAG | gzip > volstream-image.tar.gz
+          ls -lh volstream-image.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: volstream-image
+          path: volstream-image.tar.gz
+          retention-days: 1
+
   deploy:
     name: Deploy to Server
     runs-on: ubuntu-latest
@@ -85,6 +100,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: volstream-image
 
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
@@ -114,14 +134,18 @@ jobs:
           scp -P $SSH_PORT docker-compose.prod.replaced.yml $SSH_USER@$SSH_HOST:$PROJECT_DIR/docker-compose.yml
           rm -f docker-compose.prod.replaced.yml
 
-          # 在服务器上拉取镜像并启动
+          # 同步镜像压缩包到服务器并加载
+          scp -P $SSH_PORT volstream-image.tar.gz $SSH_USER@$SSH_HOST:$PROJECT_DIR/volstream-image.tar.gz
+
+          # 在服务器上加载镜像并启动
           ssh -p $SSH_PORT $SSH_USER@$SSH_HOST << EOF
             set -e
             cd $PROJECT_DIR
-            docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-            docker pull $IMAGE_TAG
+            gunzip -c volstream-image.tar.gz | docker load
+            docker tag $IMAGE_TAG volstream:latest || true
             docker-compose up -d
             docker-compose exec -T timescaledb pg_isready -U \${DB_USER} -d \${DB_NAME} || sleep 5
             docker-compose exec -T app python main.py init-db
+            rm -f volstream-image.tar.gz
             docker image prune -f
           EOF

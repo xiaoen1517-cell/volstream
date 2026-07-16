@@ -1,0 +1,42 @@
+app:
+  name: volstream
+  log_level: INFO
+  history_days: 30
+
+exchange:
+  name: binance  # binance | okx
+  sandbox: false
+  enableRateLimit: true
+
+symbols:
+  - BTC/USDT
+
+timeframes:
+  - 15m
+  - 1h
+  - 4h
+
+weights:
+  15m: 0.2
+  1h: 0.3
+  4h: 0.5
+
+indicators:
+  ema_short: 12
+  ema_long: 26
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+
+analytics:
+  whale_threshold_usd: 50000  # 单笔成交超过此金额视为大单
+  volume_profile_bins: 24      # 每个周期价格分桶数
+  value_area_ratio: 0.70       # Value Area 包含 70% 成交量
+  iceberg_lookback_trades: 20  # 冰山检测回溯成交数
+  iceberg_score_threshold: 0.6 # 冰山信号输出阈值
+
+signal:
+  strength_threshold:
+    strong: 70
+    moderate: 40

@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: volstream_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-crypto}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-crypto123}
+      POSTGRES_DB: ${DB_NAME:-volstream}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crypto} -d ${DB_NAME:-volstream}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: volstream_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    command: ["python", "main.py", "run", "--symbol", "BTC/USDT"]
+
+volumes:
+  timescale_data:

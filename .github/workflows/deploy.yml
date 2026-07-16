@@ -80,6 +80,7 @@ jobs:
   deploy:
     name: Deploy to Server
     runs-on: ubuntu-latest
+    environment: aliyunvolstream
     needs: build
     steps:
       - name: Setup SSH

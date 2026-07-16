@@ -45,20 +45,30 @@ pytest
 SKIP_DB_TESTS=0 pytest
 ```
 
-## 生产部署（GitHub Actions + 自有服务器）
+## 生产部署（GitHub Actions + GHCR + 自有服务器）
+
+部署流程：**本地 push 代码 → GitHub Actions 运行测试 → 构建 Docker 镜像并推送到 GHCR → SSH 到服务器拉取镜像 → docker-compose 重启服务**。
+
+服务器上**不需要**手动 `git pull` 或 `docker build`，只需要保留 `docker-compose.yml` 与 `.env`。
 
 ### 服务器首次准备
 
-1. 在服务器上克隆仓库：
+1. 在服务器上创建项目目录：
 
 ```bash
-git clone https://github.com/<your-username>/volstream.git /opt/volstream
+mkdir -p /opt/volstream
 cd /opt/volstream
 ```
 
 2. 服务器必须安装 Docker 与 Docker Compose。
 
-3. 可选：在服务器上手动放置 `.env` 文件，后续由 GitHub Actions 自动覆盖。
+3. 手动放置初始 `docker-compose.yml`（从仓库复制 `docker-compose.prod.yml`）：
+
+```bash
+cp /path/to/volstream/docker-compose.prod.yml /opt/volstream/docker-compose.yml
+```
+
+4. 后续 `.env` 文件由 GitHub Actions 自动写入。
 
 ### 配置 GitHub Secrets
 
@@ -73,19 +83,34 @@ cd /opt/volstream
 | `PROJECT_DIR` | 服务器上的项目目录（可选，默认 `/opt/volstream`） |
 | `ENV_FILE` | 生产环境完整的 `.env` 文件内容 |
 
+GitHub Actions 使用仓库内置的 `GITHUB_TOKEN` 登录 GHCR，无需额外配置 Token。
+
 ### 部署触发
 
 - 每次 `push` 到 `main` 分支会自动运行测试并部署。
 - 也可在 GitHub Actions 页面手动触发 `workflow_dispatch`。
 
+### 镜像 Tag 规则
+
+每次构建会生成两个 tag：
+
+- `ghcr.io/<your-username>/volstream:latest`
+- `ghcr.io/<your-username>/volstream:<YYYYMMDD-HHMMSS>-<short-sha>`
+
+例如：`ghcr.io/your-username/volstream:20240716-034052-a1b2c3d`
+
+服务器部署时使用带时间戳的 tag，`latest` 可供手动回滚或本地测试。
+
 ### 部署流程
 
 1. GitHub Actions 运行单元测试。
-2. 通过 SSH 连接服务器，拉取最新代码。
-3. 将 `ENV_FILE` 写入服务器 `.env`。
-4. 执行 `docker-compose up -d --build` 重建并启动服务。
-5. 执行 `python main.py init-db` 确保表结构最新。
-6. 清理旧 Docker 镜像。
+2. 构建 Docker 镜像并推送到 `ghcr.io`。
+3. 通过 SSH 连接服务器。
+4. 将 `ENV_FILE` 写入服务器 `.env`。
+5. 将 `docker-compose.prod.yml` 同步到服务器，并替换为本次构建的带时间戳镜像 tag。
+6. 服务器执行 `docker pull <tag>` 并 `docker-compose up -d` 重启。
+7. 执行 `python main.py init-db` 确保表结构最新。
+8. 清理旧 Docker 镜像。
 
 ## 服务器配置建议
 

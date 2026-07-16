@@ -143,9 +143,9 @@ jobs:
             cd $PROJECT_DIR
             gunzip -c volstream-image.tar.gz | docker load
             docker tag $IMAGE_TAG volstream:latest || true
-            docker-compose up -d
-            docker-compose exec -T timescaledb pg_isready -U \${DB_USER} -d \${DB_NAME} || sleep 5
-            docker-compose exec -T app python main.py init-db
+            docker compose up -d
+            docker compose exec -T timescaledb pg_isready -U \${DB_USER} -d \${DB_NAME} || sleep 5
+            docker compose exec -T app python main.py init-db
             rm -f volstream-image.tar.gz
             docker image prune -f
           EOF

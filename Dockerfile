@@ -15,5 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制项目代码
 COPY . .
 
+# 确保项目结构完整，并验证关键模块可导入
+ENV PYTHONPATH=/app
+RUN python -c "import src.config; import src.data.kline_store; import src.exchange.websocket_client; print('imports OK')"
+
 # 默认命令：启动实时分析（可通过 docker-compose 覆盖）
 CMD ["python", "main.py", "run", "--symbol", "BTC/USDT"]

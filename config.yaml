@@ -8,6 +8,12 @@ exchange:
   sandbox: false
   enableRateLimit: true
 
+websocket:
+  open_timeout: 30
+  ping_timeout: 20
+  close_timeout: 10
+  proxy: ""  # e.g. socks5://127.0.0.1:1080 or http://127.0.0.1:7890
+
 symbols:
   - BTC/USDT
 

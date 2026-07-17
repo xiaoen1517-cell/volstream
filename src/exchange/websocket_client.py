@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
+from typing import Optional
 
 import websockets
 
@@ -12,6 +14,19 @@ from src.signals.aggregate import SignalAggregator
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _load_proxy():
+    """读取环境变量或配置文件中的 WebSocket 代理。"""
+    proxy_url = os.getenv("WS_PROXY") or CONFIG.get("websocket", {}).get("proxy", "")
+    if not proxy_url:
+        return None
+    try:
+        from aiohttp_socks import ProxyConnector
+        return ProxyConnector.from_url(proxy_url)
+    except ImportError:
+        logger.warning("aiohttp-socks 未安装，无法使用代理")
+        return None
 
 
 class ExchangeWebSocketClient:
@@ -39,6 +54,12 @@ class ExchangeWebSocketClient:
         if self.exchange_name == "binance":
             return self.BINANCE_WS.format(streams=self._build_streams())
         raise NotImplementedError(f"WebSocket for {self.exchange_name} not implemented")
+
+    def _ws_timeout(self, key: str, default: int) -> int:
+        env_val = os.getenv(f"WS_{key.upper()}_TIMEOUT")
+        if env_val:
+            return int(env_val)
+        return int(CONFIG.get("websocket", {}).get(key, default))
 
     async def _process_message(self, msg: dict):
         stream = msg.get("stream", "")
@@ -84,15 +105,34 @@ class ExchangeWebSocketClient:
 
     async def run(self):
         url = self._build_url()
-        logger.info(f"连接 WebSocket: {url}")
+        proxy = _load_proxy()
+        open_timeout = self._ws_timeout("open", 30)
+        ping_timeout = self._ws_timeout("ping", 20)
+        close_timeout = self._ws_timeout("close", 10)
+
+        logger.info(
+            f"连接 WebSocket: {url} | proxy={'yes' if proxy else 'no'} | "
+            f"open_timeout={open_timeout}s"
+        )
         while True:
             try:
-                async with websockets.connect(url) as ws:
+                connect_kwargs = {
+                    "open_timeout": open_timeout,
+                    "ping_timeout": ping_timeout,
+                    "close_timeout": close_timeout,
+                }
+                if proxy:
+                    connect_kwargs["proxy"] = proxy
+
+                async with websockets.connect(url, **connect_kwargs) as ws:
                     async for message in ws:
                         await self._process_message(json.loads(message))
             except websockets.exceptions.ConnectionClosed as e:
                 logger.warning(f"WebSocket 断开: {e}，5 秒后重连...")
                 await asyncio.sleep(5)
+            except TimeoutError as e:
+                logger.error(f"WebSocket 连接超时: {e}，10 秒后重连...")
+                await asyncio.sleep(10)
             except Exception as e:
                 logger.error(f"WebSocket 异常: {e}", exc_info=True)
                 await asyncio.sleep(5)

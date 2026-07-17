@@ -20,7 +20,7 @@ services:
       retries: 5
 
   app:
-    image: ${IMAGE_TAG:-ghcr.io/xiaoen1517-cell/volstream:latest}
+    image: volstream:deployed
     container_name: volstream_app
     restart: unless-stopped
     env_file:

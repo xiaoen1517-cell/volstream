@@ -129,10 +129,8 @@ jobs:
           scp -P $SSH_PORT .env.production $SSH_USER@$SSH_HOST:$PROJECT_DIR/.env
           rm -f .env.production
 
-          # 同步生产 compose 文件并替换镜像标签
-          sed "s|\\${IMAGE_TAG}|$IMAGE_TAG|g" docker-compose.prod.yml > docker-compose.prod.replaced.yml
-          scp -P $SSH_PORT docker-compose.prod.replaced.yml $SSH_USER@$SSH_HOST:$PROJECT_DIR/docker-compose.yml
-          rm -f docker-compose.prod.replaced.yml
+          # 同步生产 compose 文件到服务器
+          scp -P $SSH_PORT docker-compose.prod.yml $SSH_USER@$SSH_HOST:$PROJECT_DIR/docker-compose.yml
 
           # 同步镜像压缩包到服务器并加载
           scp -P $SSH_PORT volstream-image.tar.gz $SSH_USER@$SSH_HOST:$PROJECT_DIR/volstream-image.tar.gz
@@ -142,7 +140,7 @@ jobs:
             set -e
             cd $PROJECT_DIR
             gunzip -c volstream-image.tar.gz | docker load
-            docker tag $IMAGE_TAG volstream:latest || true
+            docker tag $IMAGE_TAG volstream:deployed
             docker compose up -d
             docker compose exec -T timescaledb pg_isready -U \${DB_USER} -d \${DB_NAME} || sleep 5
             docker compose exec -T app python main.py init-db

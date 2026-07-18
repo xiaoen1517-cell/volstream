@@ -91,7 +91,7 @@ jobs:
           rm -f .env.production
 
           # 同步生产 compose 文件并替换镜像标签
-          sed "s|\\${IMAGE_TAG}|$IMAGE_TAG|g" docker-compose.prod.yml > docker-compose.prod.replaced.yml
+          sed "s|[$]{IMAGE_TAG}|$IMAGE_TAG|g" docker-compose.prod.yml > docker-compose.prod.replaced.yml
           scp -P $SSH_PORT docker-compose.prod.replaced.yml $SSH_USER@$SSH_HOST:$PROJECT_DIR/docker-compose.yml
           rm -f docker-compose.prod.replaced.yml
 

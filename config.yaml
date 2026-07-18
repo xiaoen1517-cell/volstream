@@ -4,7 +4,7 @@ app:
   history_days: 30
 
 exchange:
-  name: okx  # binance | okx
+  name: binance  # binance | okx
   sandbox: false
   enableRateLimit: true
 

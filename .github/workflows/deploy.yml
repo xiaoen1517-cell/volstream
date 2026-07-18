@@ -91,14 +91,7 @@ jobs:
           rm -f .env.production
 
           # 同步生产 compose 文件并替换镜像标签
-          python3 - <<PY
-import os
-with open('docker-compose.prod.yml') as f:
-    content = f.read()
-content = content.replace('${IMAGE_TAG}', os.environ['IMAGE_TAG'])
-with open('docker-compose.prod.replaced.yml', 'w') as f:
-    f.write(content)
-PY
+          sed "s|\\${IMAGE_TAG}|$IMAGE_TAG|g" docker-compose.prod.yml > docker-compose.prod.replaced.yml
           scp -P $SSH_PORT docker-compose.prod.replaced.yml $SSH_USER@$SSH_HOST:$PROJECT_DIR/docker-compose.yml
           rm -f docker-compose.prod.replaced.yml
 

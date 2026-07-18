@@ -56,10 +56,12 @@ class ExchangeWebSocketClient(ABC):
 
     @abstractmethod
     def parse_kline(self, data: Any) -> Optional[Dict[str, Any]]:
+        """解析 K 线数据，返回统一格式或 None。"""
         raise NotImplementedError
 
     @abstractmethod
-    def parse_trade(self, data: Any) -> Optional[Dict[str, Any]]:
+    def parse_trades(self, data: Any) -> List[Dict[str, Any]]:
+        """解析成交数据，返回统一格式列表。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -87,11 +89,10 @@ class ExchangeWebSocketClient(ABC):
     async def _process_message(self, msg: Dict[str, Any]):
         tf = self.get_timeframe_from_message(msg)
         if tf:
-            data_list = msg.get("data", [])
-            if not data_list:
+            raw = msg.get("data")
+            if raw is None:
                 return
-            # OKX/Binance 推送的都是数组，取最后一条（最新状态）
-            kline = self.parse_kline(data_list[-1])
+            kline = self.parse_kline(raw)
             if not kline:
                 return
             closed = self.kline_store.update(tf, kline)
@@ -99,15 +100,13 @@ class ExchangeWebSocketClient(ABC):
                 await self._on_kline_closed(tf, kline)
             return
 
-        trade_data = msg.get("data")
-        if trade_data:
-            # Binance 单条，OKX 数组
-            items = trade_data if isinstance(trade_data, list) else [trade_data]
-            for item in items:
-                trade = self.parse_trade(item)
-                if trade:
-                    for tf in CONFIG["timeframes"]:
-                        self.trade_buffer.add(tf, trade)
+        raw = msg.get("data")
+        if raw is None:
+            return
+        trades = self.parse_trades(raw)
+        for trade in trades:
+            for tf in CONFIG["timeframes"]:
+                self.trade_buffer.add(tf, trade)
 
     async def run(self):
         url = self.build_url()
@@ -160,7 +159,12 @@ class BinanceWebSocketClient(ExchangeWebSocketClient):
         return []
 
     def parse_kline(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # Binance 组合流 data 是单条事件 dict，不是数组
+        if not isinstance(data, dict):
+            return None
         k = data.get("k", data)
+        if not isinstance(k, dict) or "t" not in k:
+            return None
         return {
             "time": datetime.fromtimestamp(k["t"] / 1000, tz=timezone.utc),
             "open": float(k["o"]),
@@ -173,8 +177,10 @@ class BinanceWebSocketClient(ExchangeWebSocketClient):
             "timestamp_ms": int(k["t"]),
         }
 
-    def parse_trade(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return {
+    def parse_trades(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if not isinstance(data, dict) or "T" not in data:
+            return []
+        trade = {
             "time": datetime.fromtimestamp(data["T"] / 1000, tz=timezone.utc),
             "price": float(data["p"]),
             "amount": float(data["q"]),
@@ -182,6 +188,7 @@ class BinanceWebSocketClient(ExchangeWebSocketClient):
             "is_buyer_maker": data.get("m", False),
             "trade_id": str(data.get("a", "")),
         }
+        return [trade]
 
     def get_timeframe_from_message(self, msg: Dict[str, Any]) -> Optional[str]:
         stream = msg.get("stream", "")
@@ -208,32 +215,40 @@ class OkxWebSocketClient(ExchangeWebSocketClient):
         return [{"op": "subscribe", "args": args}]
 
     def parse_kline(self, data: List[Any]) -> Optional[Dict[str, Any]]:
-        if not isinstance(data, list) or len(data) < 9:
+        if not isinstance(data, list) or not data:
             return None
         # OKX candle 字段顺序: ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm
-        ts = int(data[0])
+        item = data[-1]
+        if not isinstance(item, list) or len(item) < 9:
+            return None
+        ts = int(item[0])
         return {
             "time": datetime.fromtimestamp(ts / 1000, tz=timezone.utc),
-            "open": float(data[1]),
-            "high": float(data[2]),
-            "low": float(data[3]),
-            "close": float(data[4]),
-            "volume": float(data[5]),
-            "quote_volume": float(data[6]) if data[6] else 0.0,
-            "is_closed": bool(int(data[8])) if len(data) > 8 else False,
+            "open": float(item[1]),
+            "high": float(item[2]),
+            "low": float(item[3]),
+            "close": float(item[4]),
+            "volume": float(item[5]),
+            "quote_volume": float(item[6]) if item[6] else 0.0,
+            "is_closed": bool(int(item[8])) if len(item) > 8 else False,
             "timestamp_ms": ts,
         }
 
-    def parse_trade(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        side = data.get("side", "buy")
-        return {
-            "time": datetime.fromtimestamp(int(data["ts"]) / 1000, tz=timezone.utc),
-            "price": float(data["px"]),
-            "amount": float(data["sz"]),
-            "quote_amount": float(data["px"]) * float(data["sz"]),
-            "is_buyer_maker": side == "sell",
-            "trade_id": str(data.get("tradeId", "")),
-        }
+    def parse_trades(self, data: List[Any]) -> List[Dict[str, Any]]:
+        if not isinstance(data, list):
+            return []
+        trades = []
+        for item in data:
+            side = item.get("side", "buy")
+            trades.append({
+                "time": datetime.fromtimestamp(int(item["ts"]) / 1000, tz=timezone.utc),
+                "price": float(item["px"]),
+                "amount": float(item["sz"]),
+                "quote_amount": float(item["px"]) * float(item["sz"]),
+                "is_buyer_maker": side == "sell",
+                "trade_id": str(item.get("tradeId", "")),
+            })
+        return trades
 
     def get_timeframe_from_message(self, msg: Dict[str, Any]) -> Optional[str]:
         arg = msg.get("arg", {})

@@ -34,7 +34,7 @@ def init_db():
 @click.option("--symbol", default=None, help="交易对，例如 BTC/USDT；省略则同步 config 中全部 symbols")
 @click.option("--days", default=None, type=int, help="同步天数，默认读取配置")
 def sync(symbol: Optional[str], days: Optional[int]):
-    """同步历史 K 线到数据库"""
+    """同步历史 K 线到数据库（显式全量拉取，不跳过）"""
     from src.exchange.client import ExchangeClient
     from src.db.repository import KlineRepository
 

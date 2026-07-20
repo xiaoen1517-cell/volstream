@@ -9,7 +9,7 @@
 - 每个 K 线周期计算 10 个量价指标：EMA12/26、MACD、RSI14、VWAP、OBV、Delta、CVD、ATR。
 - WebSocket 实时接收成交数据，计算 Volume Profile（POC / Value Area）。
 - 大额订单（Whale）与冰山订单（Iceberg）迹象检测。
-- 四周期共振加权（5m:0.25 / 15m:0.30 / 1h:0.30 / 4h:0.15），在 5m 闭合时输出统一趋势信号。
+- 四周期共振加权（5m:0.25 / 15m:0.30 / 1h:0.30 / 4h:0.15），在 5m 闭合时重算四周期指标并输出统一趋势信号。
 - 各周期闭合时基于实时成交计算 POC，并以 Value Area 作为支撑 / 压力位。
 - 5 分钟共振结果可通过 Telegram Bot 推送（配置 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`）。
 - 使用 PostgreSQL + TimescaleDB 持久化 K 线与分析结果，默认保留 30 天。
@@ -35,7 +35,8 @@ python main.py sync
 # 或只同步单个交易对
 python main.py sync --symbol BTC/USDT
 
-# 6. 启动实时分析（省略 --symbol 则并发跑全部币种）
+# 6. 启动实时分析（省略 --symbol 则并发跑全部币种；
+#    启动时会检查并补全不足的历史 K 线，再用历史数据为四周期分析打底）
 python main.py run
 
 # 或只跑单个交易对

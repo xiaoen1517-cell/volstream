@@ -92,6 +92,14 @@ class KlineRepository:
         df = df.sort_values("time").reset_index(drop=True)
         return df
 
+    def count_klines(self, symbol: str, exchange: str, timeframe: str) -> int:
+        with SessionLocal() as session:
+            return (
+                session.query(Kline)
+                .filter_by(symbol=symbol, exchange=exchange, timeframe=timeframe)
+                .count()
+            )
+
     def cleanup_old_data(self, days: int = 30) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         with SessionLocal() as session:

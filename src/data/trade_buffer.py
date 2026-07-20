@@ -20,5 +20,9 @@ class TradeBuffer:
         self._buffers[timeframe] = []
         return trades
 
+    def peek(self, timeframe: str) -> List[dict]:
+        """查看缓冲中的成交，不清空（用于未收盘大周期的临时重算）。"""
+        return list(self._buffers[timeframe])
+
     def count(self, timeframe: str) -> int:
         return len(self._buffers[timeframe])

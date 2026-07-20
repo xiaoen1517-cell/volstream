@@ -69,10 +69,13 @@ class ExchangeWebSocketClient(ABC):
         raise NotImplementedError
 
     async def _on_kline_closed(self, timeframe: str, kline: Dict[str, Any]):
+        from src.utils.exchange_time import format_kline_period
+
         tf_cn = {"5m": "5分钟", "15m": "15分钟", "1h": "1小时", "4h": "4小时"}.get(
             timeframe, timeframe
         )
-        logger.info(f"【{self.symbol} · {tf_cn}】K 线已收盘，开始分析…")
+        period = format_kline_period(kline, timeframe)
+        logger.info(f"【{self.symbol} · {tf_cn}】交易所K线 {period} 已收盘，开始分析…")
         self.kline_repo.save_klines(
             self.symbol, self.exchange_name, timeframe, [
                 [
@@ -87,7 +90,21 @@ class ExchangeWebSocketClient(ABC):
             ]
         )
         trades = self.trade_buffer.flush(timeframe)
-        await self.aggregator.analyze(timeframe, kline, trades)
+
+        # 非 5m：只更新本周期（收盘成交更完整）；共振统一由 5m 触发
+        if timeframe != "5m":
+            await self.aggregator.analyze(
+                timeframe, kline, trades, emit_resonance=False
+            )
+            return
+
+        # 5m：重算四个周期指标后再共振，避免大周期丢掉刚收的这根 5m
+        higher_trades = {
+            tf: self.trade_buffer.peek(tf)
+            for tf in CONFIG["timeframes"]
+            if tf != "5m"
+        }
+        await self.aggregator.on_5m_close(kline, trades, higher_trades)
 
     async def _process_message(self, msg: Dict[str, Any]):
         tf = self.get_timeframe_from_message(msg)
@@ -98,6 +115,12 @@ class ExchangeWebSocketClient(ABC):
             kline = self.parse_kline(raw)
             if not kline:
                 return
+            if kline.get("close_timestamp_ms") is None:
+                from src.utils.exchange_time import resolve_close_ms
+
+                kline["close_timestamp_ms"] = resolve_close_ms(
+                    int(kline["timestamp_ms"]), tf
+                )
             closed = self.kline_store.update(tf, kline)
             if closed:
                 await self._on_kline_closed(tf, kline)
@@ -178,6 +201,7 @@ class BinanceWebSocketClient(ExchangeWebSocketClient):
             "quote_volume": float(k["q"]),
             "is_closed": k["x"],
             "timestamp_ms": int(k["t"]),
+            "close_timestamp_ms": int(k["T"]) if k.get("T") is not None else None,
         }
 
     def parse_trades(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -235,6 +259,7 @@ class OkxWebSocketClient(ExchangeWebSocketClient):
             "quote_volume": float(item[6]) if item[6] else 0.0,
             "is_closed": bool(int(item[8])) if len(item) > 8 else False,
             "timestamp_ms": ts,
+            "close_timestamp_ms": None,
         }
 
     def parse_trades(self, data: List[Any]) -> List[Dict[str, Any]]:
@@ -270,11 +295,32 @@ def create_client(symbol: str) -> ExchangeWebSocketClient:
     raise ValueError(f"Unsupported exchange: {exchange}")
 
 
+async def bootstrap_analysis(symbols: List[str]) -> None:
+    """启动前为各币种四周期用历史 K 线打底，避免新币种等不到 4h 收盘。"""
+    exchange = CONFIG["exchange"]["name"]
+    logger.info(f"开始历史分析打底: {', '.join(symbols)}")
+    for symbol in symbols:
+        aggregator = SignalAggregator(symbol, exchange)
+        count = await aggregator.bootstrap_from_klines()
+        logger.info(f"【{symbol}】打底完成，已覆盖 {count}/{len(CONFIG['timeframes'])} 个周期")
+
+
+async def ensure_startup_data(symbols: List[str]) -> None:
+    """启动检查：历史 K 线不足则补全，再做分析打底。"""
+    from src.data.history import ensure_history
+
+    # 拉取为同步 IO，放到线程池以免卡住事件循环过久（虽此时尚未连 WS）
+    await asyncio.to_thread(ensure_history, symbols)
+    await bootstrap_analysis(symbols)
+
+
 async def run_websocket(symbol: Optional[str] = None):
     """启动 WebSocket；未指定 symbol 时并发跑 CONFIG['symbols'] 全部交易对。"""
     symbols = [symbol] if symbol else list(CONFIG["symbols"])
     if not symbols:
         raise ValueError("未指定交易对，且 config.yaml 中 symbols 为空")
+
+    await ensure_startup_data(symbols)
 
     logger.info(f"启动 WebSocket 实时分析: {', '.join(symbols)}")
     clients = [create_client(s) for s in symbols]

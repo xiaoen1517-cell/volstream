@@ -9,6 +9,7 @@ from src.analytics.whale_detector import WhaleDetector
 from src.config import CONFIG
 from src.db.repository import AnalysisRepository, KlineRepository, WhaleTradeRepository
 from src.indicators.price_volume import calculate_all
+from src.utils.exchange_time import format_kline_period
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +24,15 @@ class SignalAggregator:
         self.whale_repo = WhaleTradeRepository()
         self.weights = CONFIG["weights"]
 
-    async def analyze(self, timeframe: str, closed_kline: dict, trades: List[dict]):
+    async def analyze(
+        self,
+        timeframe: str,
+        closed_kline: dict,
+        trades: List[dict],
+        *,
+        emit_resonance: bool = True,
+        quiet: bool = False,
+    ):
         limit = 100
         df = self.kline_repo.get_latest_klines(
             self.symbol, self.exchange, timeframe, limit=limit
@@ -97,17 +106,118 @@ class SignalAggregator:
         }
         self.analysis_repo.save(result)
 
-        logger.info(
-            f"【{self.symbol} · {_tf_label(timeframe)}】"
-            f"趋势{_signal_cn(single_signal)}（强度 {single_strength:.0f}）｜"
-            f"成交密集区 {_fmt_price(poc)}，"
-            f"支撑 {_fmt_price(support)}，压力 {_fmt_price(resistance)}"
-            + (f"｜依据：{reason}" if reason and reason != "无明显信号" else "")
+        period = format_kline_period(closed_kline, timeframe)
+        if not quiet:
+            logger.info(
+                f"【{self.symbol} · {_tf_label(timeframe)} · {period}】"
+                f"趋势{_signal_cn(single_signal)}（强度 {single_strength:.0f}）｜"
+                f"成交密集区 {_fmt_price(poc)}，"
+                f"支撑 {_fmt_price(support)}，压力 {_fmt_price(resistance)}"
+                + (f"｜依据：{reason}" if reason and reason != "无明显信号" else "")
+            )
+
+        # 仅在外部显式要求时共振（5m 收盘重算完四周期后再聚合）
+        if timeframe == "5m" and emit_resonance:
+            self._aggregate(closed_kline)
+
+    async def on_5m_close(
+        self,
+        kline_5m: dict,
+        trades_5m: List[dict],
+        higher_tf_trades: Dict[str, List[dict]],
+    ):
+        """
+        5m 收盘：先分析 5m，再按最新 5m 合成并重算 15m/1h/4h，最后共振。
+        这样大周期指标会包含刚收盘的这根 5m，而不会仍停留在上一根大周期收盘时。
+        """
+        from src.data.htf_candle import build_htf_candle_from_5m
+
+        await self.analyze(
+            "5m", kline_5m, trades_5m, emit_resonance=False, quiet=False
         )
 
-        # 仅在 5m 闭合时做四周期共振（入场节奏）
-        if timeframe == "5m":
-            self._aggregate()
+        for timeframe in CONFIG["timeframes"]:
+            if timeframe == "5m":
+                continue
+            htf = build_htf_candle_from_5m(
+                self.kline_repo, self.symbol, self.exchange, timeframe
+            )
+            if not htf:
+                logger.warning(
+                    f"【{self.symbol} · {_tf_label(timeframe)}】无法由 5m 合成，跳过重算"
+                )
+                continue
+
+            self.kline_repo.save_klines(
+                self.symbol,
+                self.exchange,
+                timeframe,
+                [
+                    [
+                        int(htf["timestamp_ms"]),
+                        htf["open"],
+                        htf["high"],
+                        htf["low"],
+                        htf["close"],
+                        htf["volume"],
+                        htf.get("quote_volume") or 0,
+                    ]
+                ],
+            )
+            await self.analyze(
+                timeframe,
+                htf,
+                higher_tf_trades.get(timeframe, []),
+                emit_resonance=False,
+                quiet=False,
+            )
+
+        self._aggregate(kline_5m)
+
+    async def bootstrap_from_klines(self) -> int:
+        """用库内最新 K 线为各周期打底 analysis，不触发共振推送。"""
+        from src.utils.exchange_time import resolve_close_ms
+
+        seeded = 0
+        for timeframe in CONFIG["timeframes"]:
+            df = self.kline_repo.get_latest_klines(
+                self.symbol, self.exchange, timeframe, limit=100
+            )
+            if df.empty:
+                logger.warning(
+                    f"【{self.symbol} · {_tf_label(timeframe)}】无历史 K 线，跳过打底"
+                )
+                continue
+
+            latest = df.iloc[-1]
+            open_time = latest["time"]
+            if getattr(open_time, "tzinfo", None) is None:
+                open_time = open_time.replace(tzinfo=timezone.utc)
+            open_ms = int(open_time.timestamp() * 1000)
+            closed_kline = {
+                "time": open_time,
+                "timestamp_ms": open_ms,
+                "close_timestamp_ms": resolve_close_ms(open_ms, timeframe),
+                "open": float(latest["open"]),
+                "high": float(latest["high"]),
+                "low": float(latest["low"]),
+                "close": float(latest["close"]),
+                "volume": float(latest["volume"]),
+                "quote_volume": float(latest.get("quote_volume") or 0),
+            }
+            await self.analyze(
+                timeframe,
+                closed_kline,
+                trades=[],
+                emit_resonance=False,
+                quiet=True,
+            )
+            seeded += 1
+            logger.info(
+                f"【{self.symbol} · {_tf_label(timeframe)}】"
+                f"已用历史 K 线打底分析（{format_kline_period(closed_kline, timeframe)}）"
+            )
+        return seeded
 
     def _single_signal(
         self, latest: pd.Series, profile: Dict, whale: Dict, iceberg: Dict
@@ -180,14 +290,15 @@ class SignalAggregator:
 
         return signal, abs(score), "；".join(reasons) if reasons else "无明显信号"
 
-    def _aggregate(self):
+    def _aggregate(self, closed_kline: dict):
         timeframes = list(CONFIG["timeframes"])
         df = self.analysis_repo.get_latest(
             self.symbol, self.exchange, timeframes, limit=1
         )
+        period = format_kline_period(closed_kline, "5m")
         if df.empty or len(df) < len(timeframes):
             logger.warning(
-                f"【{self.symbol}】5 分钟刚收盘，但四周期数据还没齐"
+                f"【{self.symbol} · {period}】5 分钟已收盘，但四周期数据还没齐"
                 f"（已有 {len(df)}/{len(timeframes)}），稍后再看共振。"
             )
             return
@@ -229,7 +340,8 @@ class SignalAggregator:
 
         hint = _resonance_hint(label)
         message = (
-            f"【{self.symbol} · 四周期共振】5 分钟收盘触发\n"
+            f"【{self.symbol} · 四周期共振】\n"
+            f"交易所K线：{period}\n"
             f"结论：{_label_cn(label)}（强度 {strength:.0f}/100）\n"
             f"{hint}\n"
             f"\n分周期：\n"
@@ -240,7 +352,7 @@ class SignalAggregator:
         from src.notify.telegram import send_message
 
         if send_message(message):
-            logger.info(f"【{self.symbol}】共振结果已推送到 Telegram")
+            logger.info(f"【{self.symbol} · {period}】共振结果已推送到 Telegram")
 
 
 def _tf_label(tf: str) -> str:

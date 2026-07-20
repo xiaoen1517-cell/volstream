@@ -29,9 +29,7 @@ def get_logger(name: str) -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(level)
-    formatter = ColoredFormatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    formatter = ColoredFormatter("%(levelname)s - %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger

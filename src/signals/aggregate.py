@@ -228,12 +228,19 @@ class SignalAggregator:
             label = "NEUTRAL"
 
         hint = _resonance_hint(label)
-        logger.info(
+        message = (
             f"【{self.symbol} · 四周期共振】5 分钟收盘触发\n"
-            f"  结论：{_label_cn(label)}（强度 {strength:.0f}/100）——{hint}\n"
-            f"  分周期：\n"
+            f"结论：{_label_cn(label)}（强度 {strength:.0f}/100）\n"
+            f"{hint}\n"
+            f"\n分周期：\n"
             + "\n".join(detail_lines)
         )
+        logger.info(message)
+
+        from src.notify.telegram import send_message
+
+        if send_message(message):
+            logger.info(f"【{self.symbol}】共振结果已推送到 Telegram")
 
 
 def _tf_label(tf: str) -> str:

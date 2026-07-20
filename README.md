@@ -11,6 +11,7 @@
 - 大额订单（Whale）与冰山订单（Iceberg）迹象检测。
 - 四周期共振加权（5m:0.25 / 15m:0.30 / 1h:0.30 / 4h:0.15），在 5m 闭合时输出统一趋势信号。
 - 各周期闭合时基于实时成交计算 POC，并以 Value Area 作为支撑 / 压力位。
+- 5 分钟共振结果可通过 Telegram Bot 推送（配置 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`）。
 - 使用 PostgreSQL + TimescaleDB 持久化 K 线与分析结果，默认保留 30 天。
 
 ## 本地快速开始

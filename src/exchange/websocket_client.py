@@ -69,7 +69,10 @@ class ExchangeWebSocketClient(ABC):
         raise NotImplementedError
 
     async def _on_kline_closed(self, timeframe: str, kline: Dict[str, Any]):
-        logger.info(f"{self.symbol} {timeframe} K 线闭合，开始分析...")
+        tf_cn = {"5m": "5分钟", "15m": "15分钟", "1h": "1小时", "4h": "4小时"}.get(
+            timeframe, timeframe
+        )
+        logger.info(f"【{self.symbol} · {tf_cn}】K 线已收盘，开始分析…")
         self.kline_repo.save_klines(
             self.symbol, self.exchange_name, timeframe, [
                 [

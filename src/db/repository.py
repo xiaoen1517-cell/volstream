@@ -122,15 +122,18 @@ class AnalysisRepository:
         timeframes: List[str],
         limit: int = 1,
     ) -> pd.DataFrame:
+        """每个 timeframe 各取最新 limit 条，避免短周期高频写入挤掉其它周期。"""
+        rows = []
         with SessionLocal() as session:
-            rows = (
-                session.query(AnalysisResult)
-                .filter_by(symbol=symbol, exchange=exchange)
-                .filter(AnalysisResult.timeframe.in_(timeframes))
-                .order_by(AnalysisResult.time.desc())
-                .limit(limit * len(timeframes))
-                .all()
-            )
+            for tf in timeframes:
+                tf_rows = (
+                    session.query(AnalysisResult)
+                    .filter_by(symbol=symbol, exchange=exchange, timeframe=tf)
+                    .order_by(AnalysisResult.time.desc())
+                    .limit(limit)
+                    .all()
+                )
+                rows.extend(tf_rows)
 
         if not rows:
             return pd.DataFrame()

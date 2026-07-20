@@ -9,7 +9,8 @@
 - 每个 K 线周期计算 10 个量价指标：EMA12/26、MACD、RSI14、VWAP、OBV、Delta、CVD、ATR。
 - WebSocket 实时接收成交数据，计算 Volume Profile（POC / Value Area）。
 - 大额订单（Whale）与冰山订单（Iceberg）迹象检测。
-- 四周期共振加权（5m:0.15 / 15m:0.25 / 1h:0.35 / 4h:0.25），输出统一趋势信号。
+- 四周期共振加权（5m:0.25 / 15m:0.30 / 1h:0.30 / 4h:0.15），在 5m 闭合时输出统一趋势信号。
+- 各周期闭合时基于实时成交计算 POC，并以 Value Area 作为支撑 / 压力位。
 - 使用 PostgreSQL + TimescaleDB 持久化 K 线与分析结果，默认保留 30 天。
 
 ## 本地快速开始

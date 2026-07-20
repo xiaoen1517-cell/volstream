@@ -66,6 +66,10 @@ class SignalAggregator:
             latest, profile, whale, iceberg
         )
 
+        poc = profile.get("poc")
+        support = profile.get("value_area_low")  # VAL → 支撑
+        resistance = profile.get("value_area_high")  # VAH → 压力
+
         result = {
             "time": closed_kline["time"],
             "symbol": self.symbol,
@@ -81,9 +85,9 @@ class SignalAggregator:
             "delta": float(latest["delta"]),
             "cvd": float(latest["cvd"]),
             "atr": float(latest["atr"]),
-            "poc": profile.get("poc"),
-            "value_area_high": profile.get("value_area_high"),
-            "value_area_low": profile.get("value_area_low"),
+            "poc": poc,
+            "value_area_high": resistance,
+            "value_area_low": support,
             "whale_buy_ratio": whale["whale_buy_ratio"],
             "whale_sell_ratio": whale["whale_sell_ratio"],
             "iceberg_score": iceberg["iceberg_score"],
@@ -93,8 +97,17 @@ class SignalAggregator:
         }
         self.analysis_repo.save(result)
 
-        # 多周期聚合
-        self._aggregate()
+        logger.info(
+            f"【{self.symbol} · {_tf_label(timeframe)}】"
+            f"趋势{_signal_cn(single_signal)}（强度 {single_strength:.0f}）｜"
+            f"成交密集区 {_fmt_price(poc)}，"
+            f"支撑 {_fmt_price(support)}，压力 {_fmt_price(resistance)}"
+            + (f"｜依据：{reason}" if reason and reason != "无明显信号" else "")
+        )
+
+        # 仅在 5m 闭合时做四周期共振（入场节奏）
+        if timeframe == "5m":
+            self._aggregate()
 
     def _single_signal(
         self, latest: pd.Series, profile: Dict, whale: Dict, iceberg: Dict
@@ -136,10 +149,10 @@ class SignalAggregator:
         if poc:
             if close > profile.get("value_area_high", close):
                 score += 15
-                reasons.append("价格突破 Value Area 上轨")
+                reasons.append("价格突破压力区")
             elif close < profile.get("value_area_low", close):
                 score -= 15
-                reasons.append("价格跌破 Value Area 下轨")
+                reasons.append("价格跌破支撑区")
 
         # Whale
         ratio_diff = whale["whale_buy_ratio"] - whale["whale_sell_ratio"]
@@ -168,23 +181,39 @@ class SignalAggregator:
         return signal, abs(score), "；".join(reasons) if reasons else "无明显信号"
 
     def _aggregate(self):
+        timeframes = list(CONFIG["timeframes"])
         df = self.analysis_repo.get_latest(
-            self.symbol, self.exchange, list(CONFIG["timeframes"]), limit=1
+            self.symbol, self.exchange, timeframes, limit=1
         )
-        if df.empty or len(df) < len(CONFIG["timeframes"]):
+        if df.empty or len(df) < len(timeframes):
+            logger.warning(
+                f"【{self.symbol}】5 分钟刚收盘，但四周期数据还没齐"
+                f"（已有 {len(df)}/{len(timeframes)}），稍后再看共振。"
+            )
             return
+
+        # 按配置中的周期顺序输出
+        by_tf = {row["timeframe"]: row for _, row in df.iterrows()}
 
         total_score = 0.0
         total_weight = 0.0
-        details = []
-        for _, row in df.iterrows():
-            tf = row["timeframe"]
+        detail_lines = []
+        for tf in timeframes:
+            row = by_tf.get(tf)
+            if row is None:
+                continue
             weight = self.weights.get(tf, 0.0)
             direction = 1 if row["signal"] == "Bullish" else (-1 if row["signal"] == "Bearish" else 0)
             score = direction * row["signal_strength"]
             total_score += score * weight
             total_weight += weight
-            details.append(f"{tf}: {row['signal']}({row['signal_strength']:.1f})")
+            detail_lines.append(
+                f"  · {_tf_label(tf)}：{_signal_cn(row['signal'])}"
+                f"（强度 {row['signal_strength']:.0f}，权重 {weight:.0%}）｜"
+                f"密集区 {_fmt_price(row.get('poc'))}，"
+                f"支撑 {_fmt_price(row.get('value_area_low'))}，"
+                f"压力 {_fmt_price(row.get('value_area_high'))}"
+            )
 
         if total_weight == 0:
             return
@@ -198,7 +227,44 @@ class SignalAggregator:
         else:
             label = "NEUTRAL"
 
+        hint = _resonance_hint(label)
         logger.info(
-            f"[共振] {self.symbol} 最终信号: {label} | 强度: {strength:.1f} | "
-            f"明细: {', '.join(details)}"
+            f"【{self.symbol} · 四周期共振】5 分钟收盘触发\n"
+            f"  结论：{_label_cn(label)}（强度 {strength:.0f}/100）——{hint}\n"
+            f"  分周期：\n"
+            + "\n".join(detail_lines)
         )
+
+
+def _tf_label(tf: str) -> str:
+    return {"5m": "5分钟", "15m": "15分钟", "1h": "1小时", "4h": "4小时"}.get(tf, tf)
+
+
+def _signal_cn(signal: str) -> str:
+    return {"Bullish": "看涨", "Bearish": "看跌", "Neutral": "中性"}.get(signal, signal)
+
+
+def _label_cn(label: str) -> str:
+    return {
+        "STRONG_BULLISH": "强势看涨",
+        "BULLISH": "偏多",
+        "NEUTRAL": "观望 / 中性",
+        "BEARISH": "偏空",
+        "STRONG_BEARISH": "强势看跌",
+    }.get(label, label)
+
+
+def _resonance_hint(label: str) -> str:
+    return {
+        "STRONG_BULLISH": "多周期同向偏多，可关注顺势做多机会",
+        "BULLISH": "整体偏多，注意回踩支撑后的反应",
+        "NEUTRAL": "多空分歧或动能不足，建议观望",
+        "BEARISH": "整体偏空，注意反弹压力位的压制",
+        "STRONG_BEARISH": "多周期同向偏空，可关注顺势做空机会",
+    }.get(label, "")
+
+
+def _fmt_price(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "暂无"
+    return f"{float(value):,.2f}"

@@ -47,6 +47,8 @@ class AnalysisResult(Base):
     poc = Column(Double)
     value_area_high = Column(Double)
     value_area_low = Column(Double)
+    poc_volume = Column(Double)
+    poc_trade_count = Column(Double)
 
     whale_buy_ratio = Column(Double)
     whale_sell_ratio = Column(Double)

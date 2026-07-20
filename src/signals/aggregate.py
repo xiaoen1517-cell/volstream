@@ -78,6 +78,8 @@ class SignalAggregator:
         poc = profile.get("poc")
         support = profile.get("value_area_low")  # VAL → 支撑
         resistance = profile.get("value_area_high")  # VAH → 压力
+        poc_volume = profile.get("poc_volume")
+        poc_trade_count = profile.get("poc_trade_count")
 
         result = {
             "time": closed_kline["time"],
@@ -97,6 +99,8 @@ class SignalAggregator:
             "poc": poc,
             "value_area_high": resistance,
             "value_area_low": support,
+            "poc_volume": poc_volume,
+            "poc_trade_count": poc_trade_count,
             "whale_buy_ratio": whale["whale_buy_ratio"],
             "whale_sell_ratio": whale["whale_sell_ratio"],
             "iceberg_score": iceberg["iceberg_score"],
@@ -111,8 +115,14 @@ class SignalAggregator:
             logger.info(
                 f"【{self.symbol} · {_tf_label(timeframe)} · {period}】"
                 f"趋势{_signal_cn(single_signal)}（强度 {single_strength:.0f}）｜"
-                f"成交密集区 {_fmt_price(poc)}，"
-                f"支撑 {_fmt_price(support)}，压力 {_fmt_price(resistance)}"
+                f"密集区 {_fmt_price(poc)}"
+                f"（量 {_fmt_qty(poc_volume)}"
+                + (
+                    f"，{int(poc_trade_count)} 笔"
+                    if poc_trade_count is not None and not pd.isna(poc_trade_count)
+                    else ""
+                )
+                + f"）｜支撑 {_fmt_price(support)}，压力 {_fmt_price(resistance)}"
                 + (f"｜依据：{reason}" if reason and reason != "无明显信号" else "")
             )
 
@@ -308,7 +318,7 @@ class SignalAggregator:
 
         total_score = 0.0
         total_weight = 0.0
-        detail_lines = []
+        sections = []
         for tf in timeframes:
             row = by_tf.get(tf)
             if row is None:
@@ -318,13 +328,7 @@ class SignalAggregator:
             score = direction * row["signal_strength"]
             total_score += score * weight
             total_weight += weight
-            detail_lines.append(
-                f"  · {_tf_label(tf)}：{_signal_cn(row['signal'])}"
-                f"（强度 {row['signal_strength']:.0f}，权重 {weight:.0%}）｜"
-                f"密集区 {_fmt_price(row.get('poc'))}，"
-                f"支撑 {_fmt_price(row.get('value_area_low'))}，"
-                f"压力 {_fmt_price(row.get('value_area_high'))}"
-            )
+            sections.append(_format_tf_section(tf, row, weight))
 
         if total_weight == 0:
             return
@@ -340,12 +344,15 @@ class SignalAggregator:
 
         hint = _resonance_hint(label)
         message = (
-            f"【{self.symbol} · 四周期共振】\n"
-            f"交易所K线：{period}\n"
-            f"结论：{_label_cn(label)}（强度 {strength:.0f}/100）\n"
+            f"【{self.symbol}】四周期共振提醒\n"
+            f"\n"
+            f"时间：{period}（5分钟收盘）\n"
+            f"\n"
+            f"【结论】{_label_cn(label)} · 强度 {strength:.0f}/100\n"
             f"{hint}\n"
-            f"\n分周期：\n"
-            + "\n".join(detail_lines)
+            f"\n"
+            f"──────── 分周期 ────────\n"
+            + "\n".join(sections)
         )
         logger.info(message)
 
@@ -387,3 +394,35 @@ def _fmt_price(value) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return "暂无"
     return f"{float(value):,.2f}"
+
+
+def _fmt_qty(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "暂无"
+    v = float(value)
+    if v >= 1000:
+        return f"{v:,.2f}"
+    if v >= 1:
+        return f"{v:,.4f}"
+    return f"{v:.6f}"
+
+
+def _format_tf_section(tf: str, row, weight: float) -> str:
+    poc = row.get("poc")
+    support = row.get("value_area_low")
+    resistance = row.get("value_area_high")
+    poc_vol = row.get("poc_volume")
+    poc_cnt = row.get("poc_trade_count")
+
+    vol_line = f"  密集区成交量：{_fmt_qty(poc_vol)}"
+    if poc_cnt is not None and not (isinstance(poc_cnt, float) and pd.isna(poc_cnt)):
+        vol_line += f" · {int(poc_cnt)} 笔"
+
+    return (
+        f"\n【{_tf_label(tf)}】{_signal_cn(row['signal'])} · "
+        f"强度 {row['signal_strength']:.0f}（权重 {weight:.0%}）\n"
+        f"  密集成交区：{_fmt_price(poc)}\n"
+        f"{vol_line}\n"
+        f"  支撑：{_fmt_price(support)}\n"
+        f"  压力：{_fmt_price(resistance)}"
+    )

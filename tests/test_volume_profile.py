@@ -14,9 +14,13 @@ def test_volume_profile_from_trades():
     assert result["value_area_high"] is not None
     assert result["value_area_low"] is not None
     assert result["value_area_low"] <= result["poc"] <= result["value_area_high"]
+    assert result["poc_volume"] is not None and result["poc_volume"] > 0
+    assert result["poc_trade_count"] is not None and result["poc_trade_count"] >= 1
+    assert result["total_volume"] == 9.0
 
 
 def test_volume_profile_empty():
     vp = VolumeProfile(trades=[])
     result = vp.calculate()
     assert result["poc"] is None
+    assert result["poc_volume"] is None

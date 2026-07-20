@@ -15,6 +15,15 @@ def init_database():
     Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:
+        # 兼容已有库：补充密集区成交量字段
+        conn.execute(text("""
+            ALTER TABLE analysis_results
+            ADD COLUMN IF NOT EXISTS poc_volume DOUBLE PRECISION
+        """))
+        conn.execute(text("""
+            ALTER TABLE analysis_results
+            ADD COLUMN IF NOT EXISTS poc_trade_count DOUBLE PRECISION
+        """))
         # 将 klines 转换为 hypertable
         conn.execute(text("""
             SELECT create_hypertable('klines', 'time', if_not_exists => TRUE,

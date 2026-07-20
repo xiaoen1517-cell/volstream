@@ -157,6 +157,8 @@ class AnalysisRepository:
                     "poc": r.poc,
                     "value_area_high": r.value_area_high,
                     "value_area_low": r.value_area_low,
+                    "poc_volume": getattr(r, "poc_volume", None),
+                    "poc_trade_count": getattr(r, "poc_trade_count", None),
                     "ema_12": r.ema_12,
                     "ema_26": r.ema_26,
                     "rsi": r.rsi,

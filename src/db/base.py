@@ -10,6 +10,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_database():
     """创建所有表，并将时序表转换为 TimescaleDB hypertable。"""
+    from src.db import models  # noqa: F401 — 注册表到 Base.metadata
+
     Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

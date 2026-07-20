@@ -20,4 +20,4 @@ ENV PYTHONPATH=/app
 RUN python -m compileall src/
 
 # 默认命令：启动实时分析（可通过 docker-compose 覆盖）
-CMD ["python", "main.py", "run", "--symbol", "BTC/USDT"]
+CMD ["python", "main.py", "run"]

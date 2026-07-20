@@ -33,7 +33,7 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/app/logs
-    command: ["python", "main.py", "run", "--symbol", "BTC/USDT"]
+    command: ["python", "main.py", "run"]
 
 volumes:
   timescale_data:

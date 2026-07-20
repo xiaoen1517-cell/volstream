@@ -267,6 +267,12 @@ def create_client(symbol: str) -> ExchangeWebSocketClient:
     raise ValueError(f"Unsupported exchange: {exchange}")
 
 
-async def run_websocket(symbol: str):
-    client = create_client(symbol)
-    await client.run()
+async def run_websocket(symbol: Optional[str] = None):
+    """启动 WebSocket；未指定 symbol 时并发跑 CONFIG['symbols'] 全部交易对。"""
+    symbols = [symbol] if symbol else list(CONFIG["symbols"])
+    if not symbols:
+        raise ValueError("未指定交易对，且 config.yaml 中 symbols 为空")
+
+    logger.info(f"启动 WebSocket 实时分析: {', '.join(symbols)}")
+    clients = [create_client(s) for s in symbols]
+    await asyncio.gather(*(c.run() for c in clients))

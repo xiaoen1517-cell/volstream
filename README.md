@@ -4,11 +4,12 @@
 
 ## 主要功能
 
-- 支持 15m / 1h / 4h 三个周期 K 线分析。
+- 支持 BTC / ETH / BNB / SOL 四个交易对（可在 `config.yaml` 的 `symbols` 中调整）。
+- 支持 5m / 15m / 1h / 4h 四个周期 K 线分析。
 - 每个 K 线周期计算 10 个量价指标：EMA12/26、MACD、RSI14、VWAP、OBV、Delta、CVD、ATR。
 - WebSocket 实时接收成交数据，计算 Volume Profile（POC / Value Area）。
 - 大额订单（Whale）与冰山订单（Iceberg）迹象检测。
-- 三周期共振加权，输出统一趋势信号。
+- 四周期共振加权（5m:0.15 / 15m:0.25 / 1h:0.35 / 4h:0.25），输出统一趋势信号。
 - 使用 PostgreSQL + TimescaleDB 持久化 K 线与分析结果，默认保留 30 天。
 
 ## 本地快速开始
@@ -26,10 +27,16 @@ docker-compose up -d
 # 4. 初始化表结构
 python main.py init-db
 
-# 5. 同步最近 30 天历史 K 线
+# 5. 同步最近 30 天历史 K 线（省略 --symbol 则同步 config 中全部币种）
+python main.py sync
+
+# 或只同步单个交易对
 python main.py sync --symbol BTC/USDT
 
-# 6. 启动实时分析
+# 6. 启动实时分析（省略 --symbol 则并发跑全部币种）
+python main.py run
+
+# 或只跑单个交易对
 python main.py run --symbol BTC/USDT
 ```
 

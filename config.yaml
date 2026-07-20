@@ -16,16 +16,21 @@ websocket:
 
 symbols:
   - BTC/USDT
+  - ETH/USDT
+  - BNB/USDT
+  - SOL/USDT
 
 timeframes:
+  - 5m
   - 15m
   - 1h
   - 4h
 
 weights:
-  15m: 0.2
-  1h: 0.3
-  4h: 0.5
+  5m: 0.15
+  15m: 0.25
+  1h: 0.35
+  4h: 0.25
 
 indicators:
   ema_short: 12

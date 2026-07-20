@@ -31,22 +31,24 @@ def init_db():
 
 
 @cli.command()
-@click.option("--symbol", default="BTC/USDT", help="交易对，例如 BTC/USDT")
+@click.option("--symbol", default=None, help="交易对，例如 BTC/USDT；省略则同步 config 中全部 symbols")
 @click.option("--days", default=None, type=int, help="同步天数，默认读取配置")
-def sync(symbol: str, days: Optional[int]):
+def sync(symbol: Optional[str], days: Optional[int]):
     """同步历史 K 线到数据库"""
     from src.exchange.client import ExchangeClient
     from src.db.repository import KlineRepository
 
     days = days or CONFIG["app"]["history_days"]
+    symbols = [symbol] if symbol else list(CONFIG["symbols"])
     client = ExchangeClient()
     repo = KlineRepository()
 
-    for timeframe in CONFIG["timeframes"]:
-        console.print(f"[cyan]同步 {symbol} {timeframe} 最近 {days} 天数据...[/cyan]")
-        klines = client.fetch_ohlcv(symbol, timeframe, days=days)
-        repo.save_klines(symbol, client.exchange_name, timeframe, klines)
-        console.print(f"[green]写入 {len(klines)} 条 {timeframe} K 线[/green]")
+    for sym in symbols:
+        for timeframe in CONFIG["timeframes"]:
+            console.print(f"[cyan]同步 {sym} {timeframe} 最近 {days} 天数据...[/cyan]")
+            klines = client.fetch_ohlcv(sym, timeframe, days=days)
+            repo.save_klines(sym, client.exchange_name, timeframe, klines)
+            console.print(f"[green]写入 {len(klines)} 条 {sym} {timeframe} K 线[/green]")
 
 
 @cli.command()
@@ -87,8 +89,8 @@ def analyze(symbol: str, timeframe: str, limit: int):
 
 
 @cli.command()
-@click.option("--symbol", default="BTC/USDT", help="交易对")
-def run(symbol: str):
+@click.option("--symbol", default=None, help="交易对；省略则并发跑 config 中全部 symbols")
+def run(symbol: Optional[str]):
     """启动 WebSocket 实时分析"""
     from src.exchange.websocket_client import run_websocket
 
